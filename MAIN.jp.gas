@@ -1,0 +1,288 @@
+/**
+ * Google スプレッドシートからデータを読み取り、Google マイマップに自動的にポイントを追加するスクリプト
+ * スプレッドシートの列構成:
+ * A列: ポイント名
+ * B列: 住所
+ * C列: 緯度
+ * D列: 経度
+ * E列: ポイントの色 (red, blue, green, yellow, purple, orange のいずれか)
+ */
+
+// マイマップのIDを設定
+const MY_MAP_ID = 'あなたのマイマップID'; // 例: '1A2B3C4D5E6F7G8H9I'
+
+// マイマップのHTTPSアドレス
+const MAP_URL = `https://www.google.com/maps/d/edit?mid=${MY_MAP_ID}`;
+
+// 高度な設定
+const API_KEY = ''; // 必要な場合はGoogleマップAPIキーを設定
+
+/**
+ * Google マイマップにスプレッドシートのデータを追加するメイン関数
+ * この関数はKMLファイルを生成して、マイマップにインポートするための手順を提供します
+ */
+function updateMyMap() {
+  try {
+    // アクティブなスプレッドシートを取得
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    
+    // データ範囲を取得（2行目から開始、1行目はヘッダーと想定）
+    const dataRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, 5);
+    const data = dataRange.getValues();
+    
+    // KMLファイルを生成
+    const kml = generateKML(data);
+    
+    // KMLファイルをドライブに保存
+    const fileName = 'マイマップデータ_' + new Date().toISOString().slice(0, 10) + '.kml';
+    const file = DriveApp.createFile(fileName, kml, 'application/vnd.google-earth.kml+xml');
+    
+    // スプレッドシートに実行ステータスを記録
+    sheet.getRange(1, 6).setValue('KMLファイル作成');
+    sheet.getRange(1, 7).setValue(new Date());
+    sheet.getRange(1, 8).setValue(file.getUrl());
+    
+    // ユーザーにKMLインポート手順を表示
+    const ui = SpreadsheetApp.getUi();
+    ui.alert(
+      'KMLファイルが作成されました',
+      `ファイル "${fileName}" がGoogleドライブに保存されました。\n\n` +
+      `マイマップへのインポート手順:\n` +
+      `1. ${MAP_URL} を開く\n` +
+      `2. レイヤーの「+」ボタンをクリック\n` +
+      `3. 「インポート」を選択\n` +
+      `4. 作成されたKMLファイル（${fileName}）を選択\n\n` +
+      `ファイルへのリンク: ${file.getUrl()}`,
+      ui.ButtonSet.OK
+    );
+    
+    Logger.log('KMLファイルを作成しました: ' + fileName);
+    
+  } catch (e) {
+    Logger.log('エラーが発生しました: ' + e.message);
+    Logger.log(e.stack);
+    
+    // エラーメッセージをユーザーに表示
+    const ui = SpreadsheetApp.getUi();
+    ui.alert('エラーが発生しました', e.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * データからKMLファイルを生成
+ * @param {Array} data - スプレッドシートから読み込んだデータの配列
+ * @return {string} - KMLファイルの内容
+ */
+function generateKML(data) {
+  // KMLヘッダー
+  let kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>マイマップデータ</name>
+    <description>Google スプレッドシートから生成されたデータ</description>
+    
+    <!-- スタイル定義 -->
+    <Style id="red">
+      <IconStyle>
+        <color>ff0000ff</color>
+        <scale>1.1</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/ms/icons/red-dot.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="blue">
+      <IconStyle>
+        <color>ffff0000</color>
+        <scale>1.1</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/ms/icons/blue-dot.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="green">
+      <IconStyle>
+        <color>ff00ff00</color>
+        <scale>1.1</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/ms/icons/green-dot.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="yellow">
+      <IconStyle>
+        <color>ff00ffff</color>
+        <scale>1.1</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/ms/icons/yellow-dot.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="purple">
+      <IconStyle>
+        <color>ff800080</color>
+        <scale>1.1</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/ms/icons/purple-dot.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="orange">
+      <IconStyle>
+        <color>ff00a5ff</color>
+        <scale>1.1</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/ms/icons/orange-dot.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    
+    <!-- フォルダー -->
+    <Folder>
+      <name>ポイント</name>\n`;
+  
+  // スプレッドシートの各行をループ処理してKMLプレースマークを追加
+  for (let i = 0; i < data.length; i++) {
+    const name = data[i][0];
+    if (!name) continue; // 名前が空の行はスキップ
+    
+    const address = data[i][1] || '';
+    const lat = data[i][2];
+    const lng = data[i][3];
+    let color = data[i][4] || 'red'; // 色が指定されていない場合は赤をデフォルトに
+    
+    // 有効な色名を確認
+    color = validateColor(color);
+    
+    // 緯度経度が提供されている場合のみポイントを追加
+    if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+      kml += `
+      <Placemark>
+        <name>${escapeXml(name)}</name>
+        <description>${escapeXml(address)}</description>
+        <styleUrl>#${color}</styleUrl>
+        <Point>
+          <coordinates>${lng},${lat},0</coordinates>
+        </Point>
+      </Placemark>\n`;
+    } else if (address) {
+      // 住所があるが緯度経度がない場合はログに記録
+      Logger.log('座標がない住所: ' + address + '（行 ' + (i + 2) + '）');
+    }
+  }
+  
+  // KMLフッター
+  kml += `    </Folder>
+  </Document>
+</kml>`;
+  
+  return kml;
+}
+
+/**
+ * XML特殊文字をエスケープ
+ * @param {string} str - エスケープする文字列
+ * @return {string} - エスケープされた文字列
+ */
+function escapeXml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/**
+ * 有効な色名を検証して返す
+ * @param {string} color - 指定された色
+ * @return {string} - 有効な色名
+ */
+function validateColor(color) {
+  const validColors = ['red', 'blue', 'green', 'yellow', 'purple', 'orange'];
+  color = String(color).toLowerCase().trim();
+  
+  if (validColors.includes(color)) {
+    return color;
+  }
+  
+  // 無効な色の場合はデフォルトの赤を返す
+  return 'red';
+}
+
+/**
+ * 住所をジオコーディングする（APIキーが必要）
+ * @param {string} address - ジオコーディングする住所
+ * @return {Object} - 緯度経度を含むオブジェクト
+ */
+function geocodeAddress(address) {
+  if (!API_KEY) {
+    throw new Error('ジオコーディングにはAPIキーが必要です');
+  }
+  
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${API_KEY}`;
+  const response = UrlFetchApp.fetch(url);
+  const json = JSON.parse(response.getContentText());
+  
+  if (json.status === 'OK' && json.results.length > 0) {
+    const location = json.results[0].geometry.location;
+    return {
+      lat: location.lat,
+      lng: location.lng
+    };
+  } else {
+    throw new Error('ジオコーディングに失敗しました: ' + json.status);
+  }
+}
+
+/**
+ * すべての住所をジオコーディングして緯度経度を更新する（APIキーが必要）
+ */
+function geocodeAllAddresses() {
+  if (!API_KEY) {
+    const ui = SpreadsheetApp.getUi();
+    ui.alert('APIキーが必要です', 'スクリプトコード内のAPI_KEY変数にAPIキーを設定してください。', ui.ButtonSet.OK);
+    return;
+  }
+  
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const dataRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, 5);
+  const data = dataRange.getValues();
+  
+  // 各行を処理
+  for (let i = 0; i < data.length; i++) {
+    const address = data[i][1];
+    
+    // 住所があり、緯度経度がまだ設定されていない場合
+    if (address && (!data[i][2] || !data[i][3])) {
+      try {
+        // ジオコーディング（1秒待機して、APIレート制限を回避）
+        Utilities.sleep(1000);
+        const location = geocodeAddress(address);
+        
+        // 緯度経度を更新
+        sheet.getRange(i + 2, 3).setValue(location.lat);
+        sheet.getRange(i + 2, 4).setValue(location.lng);
+        
+        Logger.log(`住所「${address}」のジオコーディング成功: 緯度=${location.lat}, 経度=${location.lng}`);
+      } catch (e) {
+        Logger.log(`住所「${address}」のジオコーディングに失敗: ${e.message}`);
+      }
+    }
+  }
+  
+  const ui = SpreadsheetApp.getUi();
+  ui.alert('ジオコーディング完了', 'すべての住所の処理が完了しました。', ui.ButtonSet.OK);
+}
+
+/**
+ * メニューを追加してUIからスクリプトを実行できるようにする
+ */
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('Google マップ')
+    .addItem('KMLファイルを作成', 'updateMyMap')
+    .addItem('住所からジオコーディング実行（APIキー必要）', 'geocodeAllAddresses')
+    .addToUi();
+}
